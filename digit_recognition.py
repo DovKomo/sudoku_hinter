@@ -2,6 +2,7 @@ import os
 
 import matplotlib.pyplot as plt
 from keras.datasets import mnist
+from keras.layers import BatchNormalization
 from keras.layers import Dense
 from keras.layers import Dropout
 from keras.layers import Flatten
@@ -25,21 +26,27 @@ def plot_mnist_images(nrows=2, ncols=3, show=False):
         plt.show()
 
 
+def prepare_data(x):
+    """Prepares images: reshapes and normalizes."""
+    # reshape to be [samples][width][height][channels]
+    x = x.reshape((x.shape[0], 28, 28, 1)).astype('float32')
+    # normalize inputs from 0-255 to 0-1
+    x = x / 255
+    return x
+
+
 def train_cnn_network(epochs=10, batch_size=200, shuffle=True, show=False):
     """Performs training steps."""
     (X_train, y_train), (X_test, y_test) = mnist.load_data()  # load data
-    # reshape to be [samples][width][height][channels]
-    X_train = X_train.reshape((X_train.shape[0], 28, 28, 1)).astype('float32')
-    X_test = X_test.reshape((X_test.shape[0], 28, 28, 1)).astype('float32')
-    # normalize inputs from 0-255 to 0-1
-    X_train = X_train / 255
-    X_test = X_test / 255
+    X_train = prepare_data(X_train)
+    X_test = prepare_data(X_test)
+
     # one hot encode outputs
     y_train = np_utils.to_categorical(y_train)
     y_test = np_utils.to_categorical(y_test)
     num_classes = y_test.shape[1]
     # build the model
-    model = cnn_architecture(num_classes, input_shape=(28, 28, 1))
+    model = cnn_architecture_2(num_classes)
     # Fit the model
     history = model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=epochs, batch_size=batch_size,
                         shuffle=shuffle)
@@ -48,23 +55,50 @@ def train_cnn_network(epochs=10, batch_size=200, shuffle=True, show=False):
     plot_model_performance(history, final_test_acc=scores[1], final_test_loss=scores[0], show=show)
 
     # save model:
-    model.save('outputs//digit_recognition//saved_model')
+    model.save('outputs//digit_recognition//saved_model.h5')
 
 
 def cnn_architecture(num_classes, input_shape=(28, 28, 1)):
     """Creates a CNN architecture."""
     model = Sequential()
-    model.add(Conv2D(32, kernel_size=5, input_shape=input_shape, activation='relu'))
+    model.add(Conv2D(32, kernel_size=5, input_shape=input_shape, padding='same', activation='relu'))
     model.add(MaxPooling2D())  # pool_size=(2, 2)
-    model.add(Conv2D(64, kernel_size=3, activation='relu'))
+    model.add(Conv2D(64, kernel_size=3, padding='same', activation='relu'))
     model.add(MaxPooling2D())
-    model.add(Dropout(0.2))
+    model.add(Dropout(0.4))
     model.add(Flatten())
     model.add(Dense(128, activation='relu'))
     model.add(Dense(50, activation='relu'))
     model.add(Dense(num_classes, activation='softmax'))
     # Compile model
     model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return model
+
+
+def cnn_architecture_2(num_classes, input_shape=(28, 28, 1)):
+    """Creates a CNN architecture (takes longer time)."""
+    # https://www.kaggle.com/cdeotte/how-to-choose-cnn-architecture-mnist/notebook
+    model = Sequential()
+
+    model.add(Conv2D(32, kernel_size=3, activation='relu', input_shape=input_shape))
+    model.add(BatchNormalization())  # model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Conv2D(32, kernel_size=5, strides=2, padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.4))
+
+    model.add(Conv2D(64, kernel_size=3, activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Conv2D(64, kernel_size=5, strides=2, padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.4))
+
+    model.add(Flatten())
+    model.add(Dense(128, activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.4))
+    model.add(Dense(num_classes, activation='softmax'))
+
+    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
 
@@ -89,4 +123,4 @@ def plot_model_performance(history, final_test_acc, final_test_loss, show=False)
 
 if __name__ == "__main__":
     plot_mnist_images(nrows=3, ncols=5, show=False)
-    train_cnn_network(epochs=10, batch_size=200, shuffle=True, show=False)
+    train_cnn_network(epochs=20, batch_size=128, shuffle=True, show=False)
