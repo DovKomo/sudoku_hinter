@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
-
+import matplotlib.pyplot as plt
+from sklearn import datasets, svm, metrics
+from sklearn.model_selection import train_test_split
 
 # ----------------------------
 # 1. Pre Processing the Image
@@ -8,7 +10,7 @@ import numpy as np
 def preprocessing(image_path):
     """Performs image preprocessing steps."""
     img = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    cv2.imshow("img", img)
+    # cv2.imshow("img", img)
 
     # # gaussian blur:
     # img = cv2.GaussianBlur(img.copy(), (9, 9), 0)
@@ -79,7 +81,7 @@ def plot_dots_on_grid_corners(img, dot_size=5):
         cv2.circle(img, (x_max, y_min), dot_size, [0, 0, 255], -1)
         cv2.circle(img, (x_min, y_max), dot_size, [0, 0, 255], -1)
         cv2.circle(img, (x_max, y_max), dot_size, [0, 0, 255], -1)
-    cv2.imshow("Dots on grid corners", processed_image)
+    cv2.imshow("Dots on grid corners", img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -102,8 +104,9 @@ if __name__ == "__main__":
     processed_image = preprocessing(image_path)
     print(f'image shape: {processed_image.shape}')
     grid_contours = get_grid_coordinates(processed_image, show=False)
-    plot_dots_on_grid_corners(processed_image)
-    grid_boxes = get_grid_boxes(processed_image, grid_contours, show=False)
+    # plot_dots_on_grid_corners(processed_image)
+    grid_boxes_img = get_grid_boxes(processed_image, grid_contours, show=False)
+
 
 # TODO: extract number of each of the grid box and get a matrix
 
