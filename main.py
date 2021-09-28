@@ -9,10 +9,10 @@ from digit_recognition import prepare_data
 # ----------------------------
 # 1. Pre Processing the Image
 # ----------------------------
-def preprocessing(path):
+def preprocessing(path, show=False):
     """Performs image preprocessing steps."""
     img = cv2.imread(path, cv2.IMREAD_COLOR)
-    # cv2.imshow("img", img)
+    img = cv2.resize(img, (361, 361))  # TODO: cropping ...
 
     # # gaussian blur:
     # img = cv2.GaussianBlur(img.copy(), (9, 9), 0)
@@ -22,16 +22,20 @@ def preprocessing(path):
     thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
 
     # invert colors:
-    process = cv2.bitwise_not(thresh, thresh)
+    process1 = cv2.bitwise_not(thresh, thresh)
 
     # erotion:
     kernel = np.array([[0., 1., 0.], [0., 1., 0.], [0., 1., 0.]], np.uint8)
     # process = cv2.dilate(process, kernel)
-    process = cv2.erode(process, kernel)
+    process = cv2.erode(process1, kernel)
 
-    # cv2.imshow("processed", process)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+    if show:
+        cv2.imshow("original image", img)
+        # cv2.imshow("thresholded image", thresh)
+        # cv2.imshow("bitwise image", process1)
+        cv2.imshow("processed image", process)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     return process
 
@@ -65,11 +69,12 @@ def get_grid_coordinates(img, show=False):
             y_max = y_coord.max()
 
             grid_contours_coord.append([x_min, x_max, y_min, y_max])
-    assert len(grid_contours_coord) == 81  # all sudoku 9*9 grids were found
 
     if show:
         cv2.imshow('Contours', grid_img)
         cv2.waitKey(0)
+
+    assert len(grid_contours_coord) == 81  # all sudoku 9*9 grids were found
 
     return grid_contours_coord
 
@@ -143,23 +148,23 @@ def check_sudoku_accuracy(predicted_digits, true_digits):
     same_digits = np.count_nonzero(predicted_digits == true_digits)
     all_digits = len(np.ravel(predicted_digits))
     acc = same_digits / all_digits
-    print(f'sudoku accuracy: {round(acc * 100, 2)}, miss predicted: {all_digits - same_digits}')
+    print(f'sudoku accuracy: {round(acc * 100, 2)}, miss-predicted: {all_digits - same_digits}')
     return acc
 
 
 if __name__ == "__main__":
-    all_paths = ['su0.png', 'su2.jpg', 'su3.jpg', 'su4.png']
-    image_path = f'data//sudoku_images//{all_paths[3]}'
-    processed_image = preprocessing(image_path)
-    # print(f'image shape: {processed_image.shape}')
-    grid_contours = get_grid_coordinates(processed_image, show=False)
+    all_paths = ['su0.png', 'su1.png', 'su2.jpg']
+    image_path = f'data//sudoku_images//{all_paths[2]}'
+    processed_image = preprocessing(image_path, show=True)
+    print(f'image shape: {processed_image.shape}')
+    grid_contours = get_grid_coordinates(processed_image, show=True)
     # plot_dots_on_grid_corners(processed_image)
     grid_boxes = get_grid_boxes(processed_image, grid_contours, dim=28, show=False)
 
     # --------------------------------------------
     digit_matrix = predict_digits(grid_boxes)
     print('digit_matrix: ', digit_matrix)
-    check_sudoku_accuracy(digit_matrix, gt.su4)
+    check_sudoku_accuracy(digit_matrix, gt.su2)
 
 # solve sudoku:
 # https://www.askpython.com/python/examples/sudoku-solver-in-python
