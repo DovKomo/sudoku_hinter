@@ -13,6 +13,7 @@ sklearn = "*"
 keras = "*"
 tensorflow = "*"
 pandas = "*"
+scikit-image = "*"
 
 [dev-packages]
 

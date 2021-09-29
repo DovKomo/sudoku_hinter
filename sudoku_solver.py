@@ -1,7 +1,7 @@
+# https://www.askpython.com/python/examples/sudoku-solver-in-python
 import numpy as np
 
 
-# https://www.askpython.com/python/examples/sudoku-solver-in-python
 def print_sudoku(a):
     """Prints sudoku."""
     for i in range(9):
