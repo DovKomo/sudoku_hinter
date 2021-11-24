@@ -1,3 +1,5 @@
+import time
+
 import cv2
 import numpy as np
 from tensorflow import keras
@@ -102,18 +104,16 @@ def check_sudoku_accuracy(predicted_digits, true_digits):
     return acc
 
 
-if __name__ == "__main__":
-    all_paths = ['su0.png', 'su1.png', 'su2.jpg']
-    image_path = f'data//sudoku_images//{all_paths[1]}'
-
-    processed_image = preprocess(image_path)
+def main(image_path):
+    processed_image = preprocess(image_path, dim=600)
     grid_mask = get_grid_mask(processed_image)
 
     grid_contours = get_grid_coordinates(grid_mask, show=False)
     grid_boxes = get_grid_boxes(processed_image, grid_contours, dim=28, show=False)
     # --------------------------------------------
     digit_matrix = predict_digits(grid_boxes)
-    print('digit_matrix: ', digit_matrix)
+    print('digit_matrix: ')
+    print(digit_matrix)
     check_sudoku_accuracy(digit_matrix, gt.su1)
 
     # --------------------------------------------
@@ -122,9 +122,19 @@ if __name__ == "__main__":
     else:
         print('Solution does not exist')
 
+
+if __name__ == "__main__":
+    all_paths = ['su0.png', 'su1.png', 'su2.jpg']
+    sudoku_unsolved_path = ['sudoku_unsolved//IMG_20210925_122407.jpg', 'sudoku_unsolved//IMG_20210925_122413.jpg']
+    image_path = f'data//sudoku_images//{all_paths[1]}'
+
+    start_time = time.time()
+    main(image_path)
+    print(f"--- Execution time: {round((time.time() - start_time), 2)} sec. ---")
+
 # TODO: print results back on an image
 # TODO: verify that sudoku is extracted well
-# TODO: retrain the model to get better results: aumentation, kaggle? label some numbers myself?
+# TODO: retrain the model to get better results: augmentation, kaggle? label some numbers myself?
 # TODO: check the time to solve sudoku: easier or harder ones.
 
 # solve sudoku:
