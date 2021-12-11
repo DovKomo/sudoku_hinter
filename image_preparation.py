@@ -137,15 +137,15 @@ def preprocess(img_path, dim=600):
     # remove salt and pepper noise
     removed_dots = remove_small_dots(resized_img, min_size=200, connectivity=10)
     median_blur = cv2.medianBlur(removed_dots, 3)
-    return median_blur
+    return median_blur, corners, img
 
 
 if __name__ == "__main__":
     all_paths = ['su0.png', 'su1.png', 'su2.jpg']
-    sudoku_unsolved_path = ['sudoku_unsolved//IMG_20210925_122407.jpg', 'sudoku_unsolved//IMG_20210925_122413.jpg']
-    sudoku_human_input_path = ['sudoku_with_human_input//IMG_20210925_125314.jpg', 'sudoku_with_human_input//IMG_20210925_125258.jpg', 'sudoku_with_human_input//IMG_20210925_125301.jpg']
-    image_path = f'data//sudoku_images//{all_paths[1]}'
-    processed_image = preprocess(image_path, dim=600)
+    sudoku_unsolved_path = ['sudoku_unsolved/IMG_20210925_122407.jpg', 'sudoku_unsolved/IMG_20210925_122413.jpg']
+    sudoku_human_input_path = ['sudoku_with_human_input/IMG_20210925_125314.jpg', 'sudoku_with_human_input/IMG_20210925_125258.jpg', 'sudoku_with_human_input/IMG_20210925_125301.jpg']
+    image_path = f'data/sudoku_images/{all_paths[1]}'
+    processed_image, corners, img = preprocess(image_path, dim=600)
     grid_mask = get_grid_mask(processed_image)
     cv2.imshow('processed_image', processed_image)
     cv2.imshow('grid_mask', grid_mask)

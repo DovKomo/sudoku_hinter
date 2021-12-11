@@ -1,15 +1,14 @@
 import os
+import time
 
-import matplotlib.pyplot as plt
 from keras.datasets import mnist
-from keras.layers import BatchNormalization
-from keras.layers import Dense
-from keras.layers import Dropout
-from keras.layers import Flatten
-from keras.layers.convolutional import Conv2D
-from keras.layers.convolutional import MaxPooling2D
-from keras.models import Sequential
 from keras.utils import np_utils
+from sklearn.metrics import classification_report
+from tensorflow.keras.optimizers import Adam
+from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+from cnn_architectures import *
+from train_plots import *
 
 
 def plot_mnist_images(nrows=2, ncols=3, show=False):
@@ -26,101 +25,127 @@ def plot_mnist_images(nrows=2, ncols=3, show=False):
         plt.show()
 
 
-def prepare_data(x):
+def prepare_data(x, size=28):
     """Prepares images: reshapes and normalizes."""
     # reshape to be [samples][width][height][channels]
-    x = x.reshape((x.shape[0], 28, 28, 1)).astype('float32')
+    x = x.reshape((x.shape[0], size, size, 1)).astype('float32')
     # normalize inputs from 0-255 to 0-1
     x = x / 255
     return x
 
 
-def train_cnn_network(epochs=10, batch_size=200, shuffle=True, show=False):
+def define_model(model_name, num_classes, img_size=28):
+    # build the model
+    if model_name == 'cnn_architecture_1':
+        model = cnn_architecture_1(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_2':
+        model = cnn_architecture_2(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_3':
+        model = cnn_architecture_3(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_4':
+        model = cnn_architecture_4(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_5':
+        model = cnn_architecture_5(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_6':
+        model = cnn_architecture_6(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_7':
+        model = cnn_architecture_7(num_classes, input_shape=(img_size, img_size, 1))
+    if model_name == 'cnn_architecture_8':
+        model = cnn_architecture_8(num_classes, input_shape=(img_size, img_size, 1))
+    return model
+
+
+def train_cnn_network(epochs=10, batch_size=200, val_ratio=0.2, early_stop_epochs=5, img_size=28, learning_rate=0.001,
+                      shuffle=True, model_name='cnn_architecture_2'):
     """Performs training steps."""
     (X_train, y_train), (X_test, y_test) = mnist.load_data()  # load data
-    X_train = prepare_data(X_train)
-    X_test = prepare_data(X_test)
+    plot_data_distribution(y_train, y_test, model_name=model_name)
+    X_train = prepare_data(X_train, size=img_size)
+    X_test = prepare_data(X_test, size=img_size)
 
     # one hot encode outputs
     y_train = np_utils.to_categorical(y_train)
     y_test = np_utils.to_categorical(y_test)
     num_classes = y_test.shape[1]
+
+    # ------------------------------
     # build the model
-    model = cnn_architecture_2(num_classes)
+    model = define_model(model_name, num_classes, img_size)
+
+    with open(f'outputs//digit_recognition//{model_name}//model_summary.txt', 'w') as f:
+        model.summary(print_fn=lambda x: f.write(x + '\n'))
+
+    optimizer = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-07)
+    model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=["accuracy"])
     # Fit the model
-    history = model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=epochs, batch_size=batch_size,
-                        shuffle=shuffle)
+    checkpoint = ModelCheckpoint(f'outputs//digit_recognition//{model_name}//tmp//checkpoints',
+                                 monitor='val_loss', save_best_only=True,
+                                 save_weights_only=True, period=1)
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=early_stop_epochs)
+    callbacks = [checkpoint, es]
+    start = time.time()
+    history = model.fit(X_train, y_train, validation_split=val_ratio, epochs=epochs, batch_size=batch_size,
+                        shuffle=shuffle, callbacks=callbacks)
+    end = time.time()
+    # ------------------------------
     # Final evaluation of the model
     scores = model.evaluate(X_test, y_test, verbose=0)
-    plot_model_performance(history, final_test_acc=scores[1], final_test_loss=scores[0], show=show)
+    plot_model_performance(history, final_test_acc=scores[1], final_test_loss=scores[0], model_name=model_name)
+
+    # get predictions
+    y_pred_raw = model.predict(X_test)
+    y_pred = np.argmax(y_pred_raw, axis=1)  # take the largest probability
+    y_test = np.argmax(y_test, axis=1)
+
+    # classification report
+    classes = list(np.unique(y_test))
+
+    report = classification_report(y_test, y_pred, digits=3, target_names=classes, output_dict=True)
+    classification_df = pd.DataFrame(report).transpose()
+
+    classification_df.to_csv(f'outputs//digit_recognition//{model_name}//classification_report.csv')
+
+    # confusion matrix
+    get_confusion_matrix(y_pred, y_test, classes, model_name=model_name)
+
+    # roc curve
+    get_roc_curves(y_pred_raw, y_test, model_name=model_name)
 
     # save model:
-    model.save('outputs//digit_recognition//saved_model.h5')
+    model.save(f'outputs//digit_recognition//{model_name}//saved_model.h5')
+    return end - start, scores[1], scores[0], X_train.shape[0] * (1 - val_ratio), X_train.shape[0] * (val_ratio), \
+           X_test.shape[0]
 
 
-def cnn_architecture(num_classes, input_shape=(28, 28, 1)):
-    """Creates a CNN architecture."""
-    model = Sequential()
-    model.add(Conv2D(32, kernel_size=5, input_shape=input_shape, padding='same', activation='relu'))
-    model.add(MaxPooling2D())  # pool_size=(2, 2)
-    model.add(Conv2D(64, kernel_size=3, padding='same', activation='relu'))
-    model.add(MaxPooling2D())
-    model.add(Dropout(0.4))
-    model.add(Flatten())
-    model.add(Dense(128, activation='relu'))
-    model.add(Dense(50, activation='relu'))
-    model.add(Dense(num_classes, activation='softmax'))
-    # Compile model
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-    return model
+def save_model_performance_results(training_time, acc, loss, trained_count, validation_count, test_count, model_name):
+    """Save and collect model performance results to a csv file."""
 
+    df_training = pd.DataFrame(data=[
+        [model_name, training_time, acc, loss, trained_count, validation_count, test_count]],
+        columns=['model', 'run_time', 'test_accuracy', 'test_loss',
+                 'trained_count', 'validation_count', 'test_count'])
 
-def cnn_architecture_2(num_classes, input_shape=(28, 28, 1)):
-    """Creates a CNN architecture (takes longer time)."""
-    # https://www.kaggle.com/cdeotte/how-to-choose-cnn-architecture-mnist/notebook
-    model = Sequential()
-
-    model.add(Conv2D(32, kernel_size=3, activation='relu', input_shape=input_shape))
-    model.add(BatchNormalization())  # model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Conv2D(32, kernel_size=5, strides=2, padding='same', activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Dropout(0.4))
-
-    model.add(Conv2D(64, kernel_size=3, activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Conv2D(64, kernel_size=5, strides=2, padding='same', activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Dropout(0.4))
-
-    model.add(Flatten())
-    model.add(Dense(128, activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Dropout(0.4))
-    model.add(Dense(num_classes, activation='softmax'))
-
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
-
-
-def plot_model_performance(history, final_test_acc, final_test_loss, show=False):
-    """Plots the model performance (accuracy and loss) in each epoch."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-    for ax, metric, final in zip([ax1, ax2], ['accuracy', 'loss'], [final_test_acc, final_test_loss]):
-        ax.plot(history.history[f'{metric}'])
-        ax.plot(history.history[f'val_{metric}'])
-        ax.set_title(f'model {metric}: {round(final * 100, 2)}%')
-        ax.set(xlabel='epoch', ylabel=f'{metric}')
-    plt.legend(['train', 'val'], loc='upper left')
-
-    img_file = 'outputs//digit_recognition//model_performance.png'
-    if os.path.exists(img_file):
-        os.remove(img_file)
-    plt.savefig(img_file)
-
-    if show:
-        plt.show()
+    df_training.to_csv(f'outputs//digit_recognition//performance_results.csv', mode='a', header=False, index=False)
 
 
 if __name__ == "__main__":
+    model_name = 'cnn_architecture_8'
+    img_size = 28
+
+    save_folder_path = f'outputs//digit_recognition//{model_name}'
+    if not os.path.exists(save_folder_path):
+        os.makedirs(save_folder_path)
+
     plot_mnist_images(nrows=3, ncols=5, show=False)
-    train_cnn_network(epochs=20, batch_size=128, shuffle=True, show=False)
+
+    training_time, acc, loss, trained_count, validation_count, test_count = train_cnn_network(epochs=50,
+                                                                                              batch_size=128,
+                                                                                              val_ratio=0.2,
+                                                                                              early_stop_epochs=5,
+                                                                                              img_size=img_size,
+                                                                                              learning_rate=0.001,
+                                                                                              shuffle=True,
+                                                                                              model_name=model_name)
+    save_model_performance_results(training_time, acc, loss,
+                                   trained_count, validation_count, test_count,
+                                   model_name=model_name)

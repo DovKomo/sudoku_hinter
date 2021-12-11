@@ -2,10 +2,13 @@ import time
 
 import cv2
 import numpy as np
-from tensorflow import keras
+from PIL import Image, ImageDraw, ImageFont
+from tensorflow.keras.optimizers import Adam
 
 import ground_truth as gt
+from digit_recognition import define_model
 from digit_recognition import prepare_data
+from image_postprocessing import inverse_perspective, put_solution, transform, stitch_img, subdivide
 from image_preparation import preprocess, get_grid_mask
 from sudoku_solver import sudoku, print_sudoku
 
@@ -71,11 +74,17 @@ def invert_colors(grid_boxes_img):
     return inverted_boxes
 
 
-def predict_digits(grid_boxes_img, saved_model='outputs//digit_recognition//saved_model.h5'):
+def predict_digits(grid_boxes_img, model_name, num_classes=10, learning_rate=0.001):
     """Predicts each digit of the cell by using the CNN model."""
     grid_boxes_img_prep = prepare_data(np.array(grid_boxes_img))
 
-    model = keras.models.load_model(saved_model)
+    # load trained model
+    model = define_model(model_name, num_classes)
+    optimizer = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-07)
+    model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=["accuracy"])
+    model.load_weights(f"outputs//digit_recognition//{model_name}//saved_model.h5")
+
+    # use model to predict digits:
     predicted_numbers = model.predict(grid_boxes_img_prep)
     predicted_numbers = np.argmax(predicted_numbers, axis=1)  # highest probability
 
@@ -104,43 +113,97 @@ def check_sudoku_accuracy(predicted_digits, true_digits):
     return acc
 
 
-def main(image_path):
-    processed_image = preprocess(image_path, dim=600)
+def validate_sudoku_digits(digit_matrix):
+    """Sudoku rows and columns should not contain duplicate numbers."""
+    for row in digit_matrix:
+        (unique, counts) = np.unique(row, return_counts=True)
+        for value, count in zip(unique, counts):
+            if value != 0:
+                if count != 1:
+                    print(f'row validation: value {value} repeats {count} times!')
+    for column in digit_matrix.T:
+        (unique, counts) = np.unique(column, return_counts=True)
+        for value, count in zip(unique, counts):
+            if value != 0:
+                if count != 1:
+                    print(f'columns validation: value {value} repeats {count} times!')
+
+
+def draw_results_on_image(img_path, digit_matrix, indexes_with_empty_values, show=True):
+    image = Image.open(img_path)
+
+    d = ImageDraw.Draw(image)
+    font = ImageFont.truetype('fonts\\FreeMono.ttf', 35)
+    coord_x = 12
+    coord_y = 5
+    step = 40
+    for row_ind, row_values in enumerate(digit_matrix):
+        for col_ind, value in enumerate(row_values):
+            if ([row_ind, col_ind] == indexes_with_empty_values).all(1).any():
+                fill = (0, 0, 165)
+                d.text((coord_x, coord_y), str(value), fill=fill, font=font)
+            else:  # todo: do not show in the end!
+                fill = 0
+                d.text((coord_x, coord_y), str(value), fill=fill, font=font)
+            coord_x += step
+        coord_x = 12
+        coord_y += step
+    # Converting from PIL to cv2 for output
+    image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    if show:
+        cv2.imshow('image', image)
+        cv2.waitKey(0)
+    return image
+
+
+def main(image_path, model_name,gt_array, show=True):
+    # --------------------------------------------
+    processed_image, corners, img = preprocess(image_path, dim=600)
     grid_mask = get_grid_mask(processed_image)
 
     grid_contours = get_grid_coordinates(grid_mask, show=False)
     grid_boxes = get_grid_boxes(processed_image, grid_contours, dim=28, show=False)
-    # --------------------------------------------
-    digit_matrix = predict_digits(grid_boxes)
-    print('digit_matrix: ')
-    print(digit_matrix)
-    check_sudoku_accuracy(digit_matrix, gt.su1)
 
     # --------------------------------------------
-    if sudoku(digit_matrix, 0, 0):
+    digit_matrix = predict_digits(grid_boxes, model_name, num_classes=10, learning_rate=0.001)
+    original_matrix = digit_matrix.copy()
+    indexes_with_empty_values = np.argwhere(np.isin(digit_matrix, [0]))
+    print('digit_matrix: ')
+    print(digit_matrix)
+    validate_sudoku_digits(digit_matrix)
+    check_sudoku_accuracy(digit_matrix, gt_array)
+
+    # --------------------------------------------
+    is_solution = sudoku(digit_matrix, 0, 0)
+    if is_solution:
         print_sudoku(digit_matrix)
     else:
         print('Solution does not exist')
+    # --------------------------------------------
+    # postprocessing
+    warped_img = transform(corners, img)
+    subd = subdivide(warped_img)
+    subd_soln = put_solution(subd, digit_matrix, original_matrix)
+    warped_soln = stitch_img(subd_soln, (warped_img.shape[0], warped_img.shape[1]))
+    warped_inverse = inverse_perspective(warped_soln, img.copy(), np.array(corners))
+
+    if show:
+        cv2.imshow('warped_inverse', warped_inverse)
+        cv2.waitKey(0)
+
+    # --------------------------------------------
+    # image = draw_results_on_image(image_path, digit_matrix, indexes_with_empty_values, show=show)
 
 
 if __name__ == "__main__":
-    all_paths = ['su0.png', 'su1.png', 'su2.jpg']
-    sudoku_unsolved_path = ['sudoku_unsolved//IMG_20210925_122407.jpg', 'sudoku_unsolved//IMG_20210925_122413.jpg']
-    image_path = f'data//sudoku_images//{all_paths[1]}'
+    all_paths = ['su0.png', 'su1.png', 'su2.jpg', 'su3.jpg', 'su4.jpg', 'su5.jpg', 'su6.jpg']
+    gt_files= [gt.su0,gt.su1, gt.su2, gt.su3, gt.su4, gt.su5]
+    sudoku_unsolved_path = ['sudoku_unsolved/IMG_20210925_122407.jpg', 'sudoku_unsolved/IMG_20210925_122413.jpg']
+    image_path = f'data/sudoku_images/{all_paths[6]}'
 
     start_time = time.time()
-    main(image_path)
+    main(image_path, model_name='cnn_architecture_7', gt_array=gt.su6, show=True)
     print(f"--- Execution time: {round((time.time() - start_time), 2)} sec. ---")
-
-# TODO: print results back on an image
-# TODO: verify that sudoku is extracted well
-# TODO: retrain the model to get better results: augmentation, kaggle? label some numbers myself?
-# TODO: check the time to solve sudoku: easier or harder ones.
-
-# solve sudoku:
-# https://www.askpython.com/python/examples/sudoku-solver-in-python
-# https://towardsdatascience.com/solve-sudoku-using-linear-programming-python-pulp-b41b29f479f3
-# https://liorsinai.github.io/coding/2020/07/27/sudoku-solver.html
 
 # more:
 # https://towardsdatascience.com/solve-sudokus-automatically-4032b2203b64
