@@ -1,5 +1,7 @@
+import logging
+import os
 import time
-
+import glob
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -45,9 +47,10 @@ def get_grid_coordinates(img, show=False):
         cv2.imshow('Contours', grid_img)
         cv2.waitKey(0)
 
-    assert len(grid_contours_coord) == 81  # all sudoku 9*9 grids were found
-
-    return grid_contours_coord
+    if len(grid_contours_coord) == 81:  # all sudoku 9*9 grids were found
+        return grid_contours_coord
+    else:
+        return False
 
 
 def get_grid_boxes(img, grid_contours_coord, dim=28, show=False):
@@ -62,7 +65,36 @@ def get_grid_boxes(img, grid_contours_coord, dim=28, show=False):
         if show:
             cv2.imshow("cropped", resized_crop_img)
             cv2.waitKey(0)
-    return grid_boxes_img
+
+    # print_multi_bounding_boxes(grid_boxes_img)  # todo: remove
+    if len(grid_boxes_img) == 81:
+        return grid_boxes_img
+    else:
+        return False
+
+
+def print_multi_bounding_boxes(grid_boxes_img):
+    # horizontally:
+    horizontal_stack = []
+    for ind in range(len(grid_boxes_img)):
+        if ind == 0:
+            imstack = grid_boxes_img[ind]
+        elif ind % 9 == 0:
+            imstack = grid_boxes_img[ind]
+        else:
+            imstack = np.hstack((imstack, grid_boxes_img[ind]))
+            if imstack.shape[1] == 252:
+                horizontal_stack.append(imstack)
+
+    # vertically:
+    for ind in range(len(horizontal_stack)):
+        if ind == 0:
+            imstack = horizontal_stack[ind]
+        else:
+            imstack = np.vstack((imstack, horizontal_stack[ind]))
+
+    cv2.imshow('stack', imstack)
+    cv2.waitKey(0)
 
 
 def invert_colors(grid_boxes_img):
@@ -115,18 +147,22 @@ def check_sudoku_accuracy(predicted_digits, true_digits):
 
 def validate_sudoku_digits(digit_matrix):
     """Sudoku rows and columns should not contain duplicate numbers."""
+    is_correct = True
     for row in digit_matrix:
         (unique, counts) = np.unique(row, return_counts=True)
         for value, count in zip(unique, counts):
             if value != 0:
                 if count != 1:
                     print(f'row validation: value {value} repeats {count} times!')
+                    is_correct = False
     for column in digit_matrix.T:
         (unique, counts) = np.unique(column, return_counts=True)
         for value, count in zip(unique, counts):
             if value != 0:
                 if count != 1:
                     print(f'columns validation: value {value} repeats {count} times!')
+                    is_correct = False
+    return is_correct
 
 
 def draw_results_on_image(img_path, digit_matrix, indexes_with_empty_values, show=True):
@@ -156,55 +192,106 @@ def draw_results_on_image(img_path, digit_matrix, indexes_with_empty_values, sho
     return image
 
 
-def main(image_path, model_name,gt_array, show=True):
+def detect_video(video_path, video_output_path, model_name, video_output_format='MP4V'):
+    vid = cv2.VideoCapture(video_path)
+
+    # by default VideoCapture returns float instead of int
+    # width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
+    # height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    width = 600
+    height = 600
+    fps = int(vid.get(cv2.CAP_PROP_FPS))
+    codec = cv2.VideoWriter_fourcc(*video_output_format)
+    out = cv2.VideoWriter(video_output_path, codec, fps, (width, height))
+
+    while True:
+        _, frame = vid.read()
+        start_time = time.time()
+        if frame is None:
+            logging.warning("Empty Frame")
+            time.sleep(0.1)
+            break
+
+        warped_inverse = main(image_path=None, img=frame, model_name=model_name, gt_array=None, from_path=False,
+                              show=False)
+        print(f'frame time: {round((time.time() - start_time) / 60, 2)} min.')
+
+        if video_output_path:
+            out.write(warped_inverse)
+            logging.warning('video frame saved!')
+
+        cv2.imshow('Recording...', warped_inverse)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Release everything if job is finished
+    out.release()
+    cv2.destroyAllWindows()
+
+
+def main(image_path, img, model_name, gt_array, from_path=True, show=True):
     # --------------------------------------------
-    processed_image, corners, img = preprocess(image_path, dim=600)
+    processed_image, corners, img = preprocess(image_path, img=img, dim=600, from_path=from_path)
     grid_mask = get_grid_mask(processed_image)
 
     grid_contours = get_grid_coordinates(grid_mask, show=False)
-    grid_boxes = get_grid_boxes(processed_image, grid_contours, dim=28, show=False)
+    if grid_contours:
+        grid_boxes = get_grid_boxes(processed_image, grid_contours, dim=28, show=False)
+        # --------------------------------------------
+        digit_matrix = predict_digits(grid_boxes, model_name, num_classes=10, learning_rate=0.001)
+        original_matrix = digit_matrix.copy()
+        indexes_with_empty_values = np.argwhere(np.isin(digit_matrix, [0]))
+        print('digit_matrix: ')
+        print(digit_matrix)
+        is_correct = validate_sudoku_digits(digit_matrix)
+        if is_correct:
+            if gt_array:
+                check_sudoku_accuracy(digit_matrix, gt_array)
 
-    # --------------------------------------------
-    digit_matrix = predict_digits(grid_boxes, model_name, num_classes=10, learning_rate=0.001)
-    original_matrix = digit_matrix.copy()
-    indexes_with_empty_values = np.argwhere(np.isin(digit_matrix, [0]))
-    print('digit_matrix: ')
-    print(digit_matrix)
-    validate_sudoku_digits(digit_matrix)
-    check_sudoku_accuracy(digit_matrix, gt_array)
+            # --------------------------------------------
+            is_solution = sudoku(digit_matrix, 0, 0)
+            if is_solution:
+                print_sudoku(digit_matrix)
+            else:
+                print('Solution does not exist')
+            # --------------------------------------------
+            # postprocessing
+            warped_img = transform(corners, img)
+            subd = subdivide(warped_img)
+            subd_soln = put_solution(subd, digit_matrix, original_matrix)
+            warped_soln = stitch_img(subd_soln, (warped_img.shape[0], warped_img.shape[1]))
+            warped_inverse = inverse_perspective(warped_soln, img.copy(), np.array(corners))
 
-    # --------------------------------------------
-    is_solution = sudoku(digit_matrix, 0, 0)
-    if is_solution:
-        print_sudoku(digit_matrix)
+            if show:
+                cv2.imshow('warped_inverse', warped_inverse)
+                cv2.waitKey(0)
+            # --------------------------------------------
+            # image = draw_results_on_image(image_path, digit_matrix, indexes_with_empty_values, show=show)
+            return warped_inverse
+        else:
+            return img
     else:
-        print('Solution does not exist')
-    # --------------------------------------------
-    # postprocessing
-    warped_img = transform(corners, img)
-    subd = subdivide(warped_img)
-    subd_soln = put_solution(subd, digit_matrix, original_matrix)
-    warped_soln = stitch_img(subd_soln, (warped_img.shape[0], warped_img.shape[1]))
-    warped_inverse = inverse_perspective(warped_soln, img.copy(), np.array(corners))
-
-    if show:
-        cv2.imshow('warped_inverse', warped_inverse)
-        cv2.waitKey(0)
-
-    # --------------------------------------------
-    # image = draw_results_on_image(image_path, digit_matrix, indexes_with_empty_values, show=show)
+        return img
 
 
 if __name__ == "__main__":
-    all_paths = ['su0.png', 'su1.png', 'su2.jpg', 'su3.jpg', 'su4.jpg', 'su5.jpg', 'su6.jpg']
-    gt_files= [gt.su0,gt.su1, gt.su2, gt.su3, gt.su4, gt.su5]
-    sudoku_unsolved_path = ['sudoku_unsolved/IMG_20210925_122407.jpg', 'sudoku_unsolved/IMG_20210925_122413.jpg']
-    image_path = f'data/sudoku_images/{all_paths[6]}'
+    # 1. detect on image:
+    all_paths = ['su0.png', 'su1.png', 'su2.jpg', 'su4.jpg', 'su5.jpg', 'su6.jpg', 'su7.jpg']
+    gt_files = [gt.su0, gt.su1, gt.su2, gt.su4, gt.su5, gt.su6]
+    all_paths = os.listdir('data/sudoku_images/')
+    for i in range(len(all_paths)):
+        if all_paths[i].endswith(".jpg"):
+            image_path = f'data/sudoku_images/{all_paths[i]}'
+            start_time = time.time()
+            warped_inverse = main(image_path, img=None, model_name='cnn_architecture_7', gt_array=None, from_path=True,
+                                  show=False)
+            filename = os.path.join(os.path.split(image_path)[0], 'saved_images', os.path.split(image_path)[1])
+            cv2.imwrite(filename, warped_inverse)
+            print(f"--- {i} - Execution time: {round((time.time() - start_time), 2)} sec. ---")
 
-    start_time = time.time()
-    main(image_path, model_name='cnn_architecture_7', gt_array=gt.su6, show=True)
-    print(f"--- Execution time: {round((time.time() - start_time), 2)} sec. ---")
-
-# more:
-# https://towardsdatascience.com/solve-sudokus-automatically-4032b2203b64
-# https://github.com/prajwalkr/SnapSudoku
+    # # 2. detect on video:
+    # start_time = time.time()
+    # video_path = 'data/sudoku_images/video/crop_video3.mp4'
+    # video_output_path = 'data/sudoku_images/video/crop_video3_saved.avi'
+    # detect_video(video_path, video_output_path, model_name='cnn_architecture_7', video_output_format='MJPG')
+    # print(f"--- Execution time: {round((time.time() - start_time), 2)} sec. ---")

@@ -114,9 +114,10 @@ def get_grid_mask(img):
     return mask
 
 
-def preprocess(img_path, dim=600):
+def preprocess(img_path,img=None, dim=600, from_path = True):
     """Performs all image preprocessing steps."""
-    img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+    if from_path:
+        img = cv2.imread(img_path, cv2.IMREAD_COLOR)
     img = cv2.resize(img, (dim, dim))
     # -------------------------------------
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
