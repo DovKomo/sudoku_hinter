@@ -1,6 +1,6 @@
 # https://www.askpython.com/python/examples/sudoku-solver-in-python
 import numpy as np
-
+import time
 
 def print_sudoku(a):
     """Prints sudoku."""
@@ -58,8 +58,9 @@ if __name__ == "__main__":
                      [0, 6, 0, 0, 0, 0, 2, 8, 0],
                      [0, 0, 0, 4, 1, 9, 0, 0, 5],
                      [0, 0, 0, 0, 8, 0, 0, 7, 9]])
-
+    start_time = time.time()
     if sudoku(grid, 0, 0):
         print_sudoku(grid)
     else:
         print('Solution does not exist')
+    print("--- %s seconds ---" % (time.time() - start_time))

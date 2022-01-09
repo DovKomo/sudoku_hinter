@@ -1,13 +1,12 @@
 import logging
-import os
 import time
-import glob
+
 import cv2
 import numpy as np
+import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 from tensorflow.keras.optimizers import Adam
 
-import ground_truth as gt
 from digit_recognition import define_model
 from digit_recognition import prepare_data
 from image_postprocessing import inverse_perspective, put_solution, transform, stitch_img, subdivide
@@ -231,14 +230,18 @@ def detect_video(video_path, video_output_path, model_name, video_output_format=
 
 def main(image_path, img, model_name, gt_array, from_path=True, show=True):
     # --------------------------------------------
+    prep_time = time.time()
     processed_image, corners, img = preprocess(image_path, img=img, dim=600, from_path=from_path)
     grid_mask = get_grid_mask(processed_image)
 
     grid_contours = get_grid_coordinates(grid_mask, show=False)
     if grid_contours:
         grid_boxes = get_grid_boxes(processed_image, grid_contours, dim=28, show=False)
+        total_prep_time = round((time.time() - prep_time), 3)
         # --------------------------------------------
+        predict_time = time.time()
         digit_matrix = predict_digits(grid_boxes, model_name, num_classes=10, learning_rate=0.001)
+        total_predict_time = round((time.time() - predict_time), 3)
         original_matrix = digit_matrix.copy()
         indexes_with_empty_values = np.argwhere(np.isin(digit_matrix, [0]))
         print('digit_matrix: ')
@@ -249,19 +252,33 @@ def main(image_path, img, model_name, gt_array, from_path=True, show=True):
                 check_sudoku_accuracy(digit_matrix, gt_array)
 
             # --------------------------------------------
+            solving_time = time.time()
             is_solution = sudoku(digit_matrix, 0, 0)
             if is_solution:
                 print_sudoku(digit_matrix)
+                total_solving_time = round((time.time() - solving_time), 3)
             else:
                 print('Solution does not exist')
             # --------------------------------------------
             # postprocessing
+            post_time = time.time()
             warped_img = transform(corners, img)
             subd = subdivide(warped_img)
             subd_soln = put_solution(subd, digit_matrix, original_matrix)
             warped_soln = stitch_img(subd_soln, (warped_img.shape[0], warped_img.shape[1]))
             warped_inverse = inverse_perspective(warped_soln, img.copy(), np.array(corners))
+            total_post_time = round((time.time() - post_time), 3)
 
+            # ---------------------------------------------
+            if is_solution:
+                # save to csv:
+                df = pd.DataFrame(data=[
+                    [total_prep_time, total_predict_time, total_solving_time, total_post_time,
+                     round(time.time() - prep_time, 3)]],
+                    columns=['preparation (sec)', 'prediction (sec)', 'solving (sec)', 'postprocessing (sec)',
+                             'full time (sec)'])
+                df.to_csv('processing_time.csv', mode='a', header=False, index=False)
+            # ---------------------------------------------
             if show:
                 cv2.imshow('warped_inverse', warped_inverse)
                 cv2.waitKey(0)
@@ -275,23 +292,23 @@ def main(image_path, img, model_name, gt_array, from_path=True, show=True):
 
 
 if __name__ == "__main__":
-    # 1. detect on image:
-    all_paths = ['su0.png', 'su1.png', 'su2.jpg', 'su4.jpg', 'su5.jpg', 'su6.jpg', 'su7.jpg']
-    gt_files = [gt.su0, gt.su1, gt.su2, gt.su4, gt.su5, gt.su6]
-    all_paths = os.listdir('data/sudoku_images/')
-    for i in range(len(all_paths)):
-        if all_paths[i].endswith(".jpg"):
-            image_path = f'data/sudoku_images/{all_paths[i]}'
-            start_time = time.time()
-            warped_inverse = main(image_path, img=None, model_name='cnn_architecture_7', gt_array=None, from_path=True,
-                                  show=False)
-            filename = os.path.join(os.path.split(image_path)[0], 'saved_images', os.path.split(image_path)[1])
-            cv2.imwrite(filename, warped_inverse)
-            print(f"--- {i} - Execution time: {round((time.time() - start_time), 2)} sec. ---")
+    # # 1. detect on image:
+    # all_paths = ['su0.png', 'su1.png', 'su2.jpg', 'su4.jpg', 'su5.jpg', 'su6.jpg', 'su7.jpg']
+    # gt_files = [gt.su0, gt.su1, gt.su2, gt.su4, gt.su5, gt.su6]
+    # all_paths = os.listdir('data/sudoku_images/')
+    # for i in range(len(all_paths)):
+    #     if all_paths[i].endswith(".jpg"):
+    #         image_path = f'data/sudoku_images/{all_paths[i]}'
+    #         start_time = time.time()
+    #         warped_inverse = main(image_path, img=None, model_name='cnn_architecture_7', gt_array=None, from_path=True,
+    #                               show=False)
+    #         filename = os.path.join(os.path.split(image_path)[0], 'saved_images', os.path.split(image_path)[1])
+    #         cv2.imwrite(filename, warped_inverse)
+    #         print(f"--- {i} - Execution time: {round((time.time() - start_time), 2)} sec. ---")
 
-    # # 2. detect on video:
-    # start_time = time.time()
-    # video_path = 'data/sudoku_images/video/crop_video3.mp4'
-    # video_output_path = 'data/sudoku_images/video/crop_video3_saved.avi'
-    # detect_video(video_path, video_output_path, model_name='cnn_architecture_7', video_output_format='MJPG')
-    # print(f"--- Execution time: {round((time.time() - start_time), 2)} sec. ---")
+    # 2. detect on video:
+    start_time = time.time()
+    video_path = 'data/sudoku_images/video/crop_video3.mp4'
+    video_output_path = 'data/sudoku_images/video/crop_video3_saved2.avi'
+    detect_video(video_path, video_output_path, model_name='cnn_architecture_7', video_output_format='MJPG')
+    print(f"--- Execution time: {round((time.time() - start_time), 2)} sec. ---")
